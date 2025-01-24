@@ -666,7 +666,7 @@ function mxODPicker(container, previewFn, getODFilesList, getODFileInfo, getRece
         		breadcrumb = [{name: mxResources.get('sharedWithMe', null, 'Shared With Me'), driveId: driveId}];
         		break;
         	case 'sharepoint':
-        		url = '/sites?search=';
+        		url = '/search/query';
         		breadcrumb = [{name: mxResources.get('sharepointSites', null, 'Sharepoint Sites'), driveId: driveId}];
         		isSharepointSites = 1;
         		break;
@@ -707,92 +707,191 @@ function mxODPicker(container, previewFn, getODFilesList, getODFileInfo, getRece
 
 		function getChunk(nextUrl)
 		{
-			getODFilesList(nextUrl? nextUrl : url, function(resp) 
-			{
-				if (!acceptRequest) return;
-				
-				var list = resp.value || [];
-
-				if (acceptAllFiles || isSharepointSites)
-				{
-					Array.prototype.push.apply(potentialDrawioFiles, list);
-				}
-				else
-				{
-					for (var i = 0; i < list.length; i++)
-					{
-						var file = list[i];
-						var mimeType = file.file? file.file.mimeType : null;
-						
-						if (file.folder || mimeType == 'text/html' || mimeType == 'text/xml' || mimeType == 'application/xml' || mimeType == 'image/png' 
-							|| /\.svg$/.test(file.name) || /\.html$/.test(file.name) || /\.xml$/.test(file.name) || /\.png$/.test(file.name)
-							|| /\.drawio$/.test(file.name) || /\.drawiolib$/.test(file.name) || /\.pdf$/.test(file.name))
+			if (driveId === 'sharepoint') {
+				var body = JSON.stringify({
+					requests: [
 						{
-							potentialDrawioFiles.push(file);
+							entityTypes: ["site"],
+							query: {
+								queryString: "*"
+							}
 						}
+					]
+				});
+				getODFilesList(nextUrl ? nextUrl : url, function(resp) 
+				{
+					if (!acceptRequest) return;
+					
+					var list = resp.value || [];
+
+					if (acceptAllFiles || isSharepointSites)
+					{
+						Array.prototype.push.apply(potentialDrawioFiles, list);
 					}
-
-					// Sorts entries by type and name
-					potentialDrawioFiles.sort(function(a, b)
+					else
 					{
-						var nameA = a.name.toLowerCase();
-						var nameB = b.name.toLowerCase();
+						for (var i = 0; i < list.length; i++)
+						{
+							var file = list[i];
+							var mimeType = file.file? file.file.mimeType : null;
+							
+							if (file.folder || mimeType == 'text/html' || mimeType == 'text/xml' || mimeType == 'application/xml' || mimeType == 'image/png' 
+								|| /\.svg$/.test(file.name) || /\.html$/.test(file.name) || /\.xml$/.test(file.name) || /\.png$/.test(file.name)
+								|| /\.drawio$/.test(file.name) || /\.drawiolib$/.test(file.name) || /\.pdf$/.test(file.name))
+							{
+								potentialDrawioFiles.push(file);
+							}
+						}
 
-						if (a.folder && !b.folder)
+						// Sorts entries by type and name
+						potentialDrawioFiles.sort(function(a, b)
 						{
-							return -1;
-						}
-						else if (!a.folder && b.folder)
-						{
-							return 1;
-						}
-						else
-						{
-							if (nameA < nameB)
+							var nameA = a.name.toLowerCase();
+							var nameB = b.name.toLowerCase();
+
+							if (a.folder && !b.folder)
 							{
 								return -1;
 							}
-							else if (nameA > nameB)
+							else if (!a.folder && b.folder)
 							{
 								return 1;
 							}
 							else
 							{
-								return 0;
+								if (nameA < nameB)
+								{
+									return -1;
+								}
+								else if (nameA > nameB)
+								{
+									return 1;
+								}
+								else
+								{
+									return 0;
+								}
+							}
+						});
+					}
+
+					if (resp['@odata.nextLink'] && potentialDrawioFiles.length < 1000) // TODO Support dynamic paging instead of 1000 limit
+					{
+						getChunk(resp['@odata.nextLink']);
+					}
+					else
+					{
+						clearTimeout(timeoutThread);
+						renderList(potentialDrawioFiles);
+					}
+				}, 
+				function(err)
+				{
+					if (!acceptRequest) return;
+					clearTimeout(timeoutThread);
+					
+					var errMsg = null;
+					
+					try
+					{
+						errMsg = JSON.parse(err.responseText).error.message;
+					}
+					catch(e){} //ignore errors
+					
+					errorFn(mxResources.get('errorFetchingFolder', null, 'Error fetching folder items') +
+						(errMsg != null? ' (' + errMsg + ')' : ''));
+
+					requestInProgress = false;
+					spinner.stop();
+				}, nextUrl != null, body);
+			} else {
+				getODFilesList(nextUrl ? nextUrl : url, function(resp) 
+				{
+					if (!acceptRequest) return;
+					
+					var list = resp.value || [];
+
+					if (acceptAllFiles || isSharepointSites)
+					{
+						Array.prototype.push.apply(potentialDrawioFiles, list);
+					}
+					else
+					{
+						for (var i = 0; i < list.length; i++)
+						{
+							var file = list[i];
+							var mimeType = file.file? file.file.mimeType : null;
+							
+							if (file.folder || mimeType == 'text/html' || mimeType == 'text/xml' || mimeType == 'application/xml' || mimeType == 'image/png' 
+								|| /\.svg$/.test(file.name) || /\.html$/.test(file.name) || /\.xml$/.test(file.name) || /\.png$/.test(file.name)
+								|| /\.drawio$/.test(file.name) || /\.drawiolib$/.test(file.name) || /\.pdf$/.test(file.name))
+							{
+								potentialDrawioFiles.push(file);
 							}
 						}
-					});
-				}
 
-				if (resp['@odata.nextLink'] && potentialDrawioFiles.length < 1000) // TODO Support dynamic paging instead of 1000 limit
+						// Sorts entries by type and name
+						potentialDrawioFiles.sort(function(a, b)
+						{
+							var nameA = a.name.toLowerCase();
+							var nameB = b.name.toLowerCase();
+
+							if (a.folder && !b.folder)
+							{
+								return -1;
+							}
+							else if (!a.folder && b.folder)
+							{
+								return 1;
+							}
+							else
+							{
+								if (nameA < nameB)
+								{
+									return -1;
+								}
+								else if (nameA > nameB)
+								{
+									return 1;
+								}
+								else
+								{
+									return 0;
+								}
+							}
+						});
+					}
+
+					if (resp['@odata.nextLink'] && potentialDrawioFiles.length < 1000) // TODO Support dynamic paging instead of 1000 limit
+					{
+						getChunk(resp['@odata.nextLink']);
+					}
+					else
+					{
+						clearTimeout(timeoutThread);
+						renderList(potentialDrawioFiles);
+					}
+				}, 
+				function(err)
 				{
-					getChunk(resp['@odata.nextLink']);
-				}
-				else
-				{
+					if (!acceptRequest) return;
 					clearTimeout(timeoutThread);
-					renderList(potentialDrawioFiles);
-				}
-			}, 
-			function(err)
-			{
-				if (!acceptRequest) return;
-				clearTimeout(timeoutThread);
-				
-				var errMsg = null;
-				
-				try
-				{
-					errMsg = JSON.parse(err.responseText).error.message;
-				}
-				catch(e){} //ignore errors
-				
-				errorFn(mxResources.get('errorFetchingFolder', null, 'Error fetching folder items') +
-					(errMsg != null? ' (' + errMsg + ')' : ''));
+					
+					var errMsg = null;
+					
+					try
+					{
+						errMsg = JSON.parse(err.responseText).error.message;
+					}
+					catch(e){} //ignore errors
+					
+					errorFn(mxResources.get('errorFetchingFolder', null, 'Error fetching folder items') +
+						(errMsg != null? ' (' + errMsg + ')' : ''));
 
-				requestInProgress = false;
-				spinner.stop();
-			}, nextUrl != null);
+					requestInProgress = false;
+					spinner.stop();
+				}, nextUrl != null);
+			}
 		};
 
 		getChunk();
